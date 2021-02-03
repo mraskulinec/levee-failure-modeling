@@ -1,0 +1,190 @@
+---
+title: "Statistical Modeling for Levee Research"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+
+#  NAME: Maria Raskulinec
+
+-----
+
+# Problem Statement
+ 
+Engineers gather data on levees on the Mississippi River that have failed in recent years, and gather the same data on some levees that have not failed during the same time. The purpose of the project is to help plan for the construction of future levees, so that future failures of newly constructed levees may be avoided. Data gathering is time consuming and measurements of some variables very difficult, and in some cases, impossible to obtain. However, a data set on 70 levees, 36 of which failed and 34 of which did not, was finally gathered. The data contain the following variables:
+Failure: = 1 if the levee failed; = 0 if not
+Mile: Distance (in miles) from the mouth of the Mississippi River
+Sed: = 1 if the underlying floodplain surface was made up of course-grained relict river sediments (gravels); = 0 if not.
+Ins: = 1 if levee located on the inside bend of the river; = 0 if not
+Pit: = 1 if there was a borrow pit located between the levee and the river; = 0 if not
+Width: The width of the buffer between the river channel and the levee
+Flood: Width of the floodplain adjacent to the levee
+ConF: Constriction factor: An index of constriction of the river channel adjacent to the levee 
+Cov: a categorical variable indicating primary cover type between levee and river; = 1 if agricultural; = 2 if forest; = 3 if grass; = 4 if open water.
+Veg: The width of the non-agricultural vegetative cover between the river channel and levee
+Sin: Sinuosity measured by thalweg length (Distance along the deepest part of the river channel) divided by 20 for the river 10 miles above and below the levee; a measure of river “curvature” over the 20 miles above and below the levee
+Dredg: The amount of material dredged from the river channel in the 1-mile stretch of river closest to the levee (half-mile above to half-mile below the levee)
+
+Analyze this data to determine what kind of advice should be given to the Director of Engineering in charge of future levee construction. She is an experienced engineer that is very knowledgeable in statistics; statistical arguments should be made to convince her of the validity of the advice you provide.
+
+This data is taken from a retrospective study. Thus, interpretation of parameters may not be meaningful. However, we can still determine which predictors are significant to the response of failure. 
+
+**STRATEGY: **
+
+Steps
+1. Read in and view the excel data.
+2. Set categorical predictors as factors.
+3. Create binary logistic regression model with all of the predictors from the dataset; run full model with summary and anova commands.
+4. Conduct a goodness-of-fit test for full model.
+5. Conduct a likelihood ratio test to try to drop the least-significant terms from model; continue re-iterating this test until only the significant predictors remain.
+6. Investigate the Dredg predictor: realize that its distribution does not make sense as continuous. Change Dredg to be a binary 0/1 predictor and rerun steps 2-6.
+7. Test for polynomial and/or interaction terms.
+8. Double check current model against AIC/BIC criteria. Take note of results from these tests. Update model if necessary. 
+9. Checking for assumptions: make residual plot, check cook's distance, check VIFs; remove any influential outliers if necessary; conduct one last goodness-of-fit test. Finally, create confidence interval for parameter coefficients. 
+10. State conclusions to the Director of Engineering; include any limitations to the sampling scheme or concerns about the dataset. 
+
+**WORK: **
+STEP ONE: Read in and view the excel data.
+```{r}
+levee_data = readxl::read_excel("levee_data.xlsx")
+View(levee_data)
+```
+
+STEP TWO: Set categorical predictors as factors.
+```{r}
+# Set categorical predictors as factors
+levee_data$Sed = as.factor(levee_data$Sed)
+levee_data$Ins = as.factor(levee_data$Ins)
+levee_data$Pit = as.factor(levee_data$Pit)
+levee_data$Cov = as.factor(levee_data$Cov)
+levee_data$Dredg[levee_data$Dredg != 0] = 1
+levee_data$Dredg = as.factor(levee_data$Dredg)
+```
+
+STEP THREE: Create binary logistic regression model with all of the predictors from the dataset; run full model with summary and anova commands.
+```{r}
+# Run full model to get diagnostics
+modelFull = glm(Failure~Mile+Sed+Ins+Pit+Width+Flood+ConF+Cov+Veg+Sin+Dredg+Year, family="binomial",data=levee_data)
+summary(modelFull)
+anova(modelFull,test="Chisq")
+```
+
+STEP FOUR: Conduct a goodness-of-fit test for full model.
+
+GOF test
+$H_o$: the model fits
+$H_a$: the model does not fit
+```{r}
+pvalue = 1 - pchisq(64.25, df=55)
+pvalue # with p-value = 0.184 > 0.05, we fail to reject the null hypothesis; there is sufficient evidence to show that the model does fit
+```
+
+STEP FIVE: Conduct a likelihood ratio test to try to drop the least-significant terms from model; continue re-iterating this test until only the significant predictors remain.
+
+LRT
+$H_o$: $\beta_{Mile} = \beta_{Ins} = \beta_{Pit} = \beta_{Width} = \beta_{Conf} =\beta_{Veg}=\beta_{Year}=0$
+$H_a$: not $H_o$
+```{r} 
+# Conduct LRT to try to get rid of terms with highest z-value: Sin, Cov, Flood
+modelRed1 = glm(Failure~Mile+Sed+Ins+Pit+Width+ConF+Veg+Dredg+Year, family="binomial",data=levee_data)
+anova(modelRed1,modelFull,test="LRT")
+summary(modelRed1)
+
+# With chisq p-value = 0.2275, we fail to reject the null hypothesis that the coefficients of these three predictors are zero
+# After changing Dredg to be binary, our new chisq p-value = 0.368; we still fail to reject the null hypothesis.
+# We remove these three predictors from the model.
+# Now we try to collectively remove all predictors besides the only significant one, Sed (this was before I changed the Dredg predictor).
+
+modelRed2 = glm(Failure~Sed + Dredg, family="binomial",data=levee_data)
+anova(modelRed2, modelFull, test="LRT")
+summary(modelRed2)
+
+# After updating Dredg, I got my p-value = 0.045; thus, we cannot drop all terms besides Sed. Now I will conduct a LRT trying to drop all terms besides Sed and Dredg
+# With p-chisq = 0.402, we fail to reject the null hypothesis that all coefficients besides Sed's are zero; we drop all terms besides Sed and Dredg from the model
+
+anova(glm(Failure~Sed+Dredg, family="binomial",data=levee_data),modelFull, test="LRT")
+```
+
+STEP SIX: Investigate the Dredg predictor: realize that its distribution does not make sense as continuous. Change Dredg to be a binary 0/1 predictor and rerun steps 2-6.
+```{r}
+# DONE EARLIER: I will try one more thing: I will create Dredge as a binary predictor: 0 if 0, 1 if Dredge != 0 
+levee_data$Dredg[levee_data$Dredg != 0] = 1
+levee_data$Dredg = as.factor(levee_data$Dredg)
+modelRed2Dredg = glm(Failure~Sed + Dredg, family="binomial",data=levee_data)
+summary(modelRed2Dredg)
+# DONE EARLIER: Now Dredge is significant. I will include it in the model. I will re-run all of the previous tests to ensure that they are correct with our updated Dredg predictor. 
+```
+
+STEP SEVEN: Test for polynomial and/or interaction terms.
+```{r}
+# I will not test for polynomial terms. Both predictors are binary, so polynomial terms would not make sense. Instead, I will test for an interaction term between Sed and Dredg
+mod_interact = glm(Failure~Sed*Dredg, family="binomial",data=levee_data)
+summary(mod_interact)
+# Adding the interaction term increased the AIC, and made both Sed and Dredg less significant. Thus, we will drop it. 
+
+# Here is our model up to this point: 
+modFin = glm(Failure~Sed+Dredg, family="binomial",data=levee_data)
+```
+
+STEP EIGHT: Double check current model against AIC/BIC criteria. Take note of results from these tests. Update model if necessary.
+```{r}
+# I will now use model selection criteria to ensure that I picked the best model 
+# I will start with AIC
+library(MASS)
+library(leaps)
+nullMod = glm(Failure~1, family="binomial",data=levee_data)
+step(modelFull, direction = "backward")
+step(nullMod,direction="forward",scope= list(upper=modelFull))
+regSubsets = regsubsets(Failure ~ Mile + Sed + Ins + Pit + Width + Flood + ConF + Cov + 
+    Veg + Sin + Dredg + Year,data=levee_data,nbest=3)
+summary(regSubsets)
+plot(regSubsets,scale="bic")
+#BIC selects Sed and Dredg. AIC selects Sed, Dredg, and Ins. 
+
+# According to the above, we picked the best two-predictor model, and likely the best model overall. However, the best three-predictor model would also include Ins. Let's summarize a model that includes this predictor to see if it's worth including.
+# Model with Ins
+InsMod = glm(formula = Failure ~ Sed + Dredg + Ins, family = "binomial", data = levee_data)
+summary(InsMod)
+
+# While Ins is more signifiant than other non-included predictors in the model, we really want a significance level of 0.05 or less. Thus, we will not include it in our final model. We will, however, make mention of it as one of the top three predictors in the conclusions. 
+
+```
+
+STEP NINE: Checking for assumptions: make residual plot, check cook's distance, check VIFs; conduct one last goodness-of-fit test. 
+```{r}
+# Check assumptions for binomial logistic regression
+library(car)
+any(vif(modFin)>4) #None of the VIFs are significant, indicating no significant multicollinearity. However, the nature of the study will keep us from interpreting coefficients.
+plot(residuals.glm(modFin)) #The residual plots both look fine. 
+residualPlot(modFin)
+plot(modFin, which = 4) # The cook's distance plot only has one outlier, obs 45, that is slightly more influential than the rest. Let's see what happens when we re-run the data without this point.
+levee_data = levee_data[-45,]
+modFin = glm(formula = Failure ~ Sed + Dredg, family = "binomial", data = levee_data)
+plot(modFin,which=4)
+summary(modFin)
+# After removing observation 45, our AIC decreased by 82.807-78.201 = 4.6; this is significant enough to want to eliminate this point. It was likely misrecorded or misentered. 
+
+# One last GOF test
+1 - pchisq(72.2,df=66)
+
+# With p-chisq = 0.281 > 0.05, we fail to reject the null hypothesis that the model fits. Thus, overdispersion is not an issue and thus, likely neither is independence of terms.
+
+#Confidence interval for coefficients; the caveat is that these coefficients should NOT be interpreted because this is a retrospective study
+exp(confint(modFin))-1
+
+```
+
+
+STEP TEN: State conclusions to the Director of Engineering; include any limitations to the sampling scheme or concerns about the dataset.
+
+**CONCLUSIONS: **
+This data is taken from a retrospective study. This means that certain types of response (1 or 0) were purposely picked to find which predictors are significant. Thus, random sampling is not to be assumed. Additionally, interpretation of parameters may not be meaningful. However, we can still determine which predictors are significant to the response of failure. Here is the final probability model, fitted: 
+
+$\pi(failure) = 1/(1+e^{-0.63-1.72*\beta_{Sed}+2.15*\beta_{Dredg}})$
+
+There is significant evidence to show that this dataset is not overdispersed, and that the data fits the binomial logistic regression model. This is evidenced through our goodness-of-fit test at $\alpha=0.05$ where we tested the null hypothesis that the model fits. The p-value for this test is 0.218 > 0.05, indicating that there is sufficient evidence to fail to reject the null hypothesis. Outliers are not driving conclusions, based on the cook's distance plot. Subjective inference is necessary because there is no random sampling method; the data are simply collected from previous historical events. As emphasized before, this is a retrospective study, so the subjective inference is only valid to the extend that parameters are not interpreted. 
+
+The predictors for the above model were chosen through an extensive selection process; all methods of model selection were taken into consideration when choosing which predictors to incorporate. In the original dataset, Dredg was an insignificant quantitative predicor. However, after transforming the predictor to be binary (0=no material dredged, 1=yes material dredged), the predictor became significant. The model was then re-evaluated entirely once this predictor was altered. The methods for predictor selection are as follows: AIC forward and backward selection; plotting of BIC subsets; best subsets procedures; likelihood ratio tests; summary evaluation for determining final model. The AIC criteria selected Sed, Dredg, and Ins. BIC selected Sed and Dredg. The best subsets procedure chose each of these models respectively for the two and three predictor models. Thus, I summarized each two and three-predictor model and found that keeping Ins only marginally decreased the model AIC while showing up as an insignificant predictor at the alpha = 0.05 significance level with p-value= 0.072 > 0.05. Thus, the final model contains Sed and Dredg, which were tested for an interaction term, but that term was found to be insignificant with p-value = 0.34 >> 0.05. 
+
+The significance of only Sed and Dredg indicates the following: the underlying floodplain surface being made up of course-grained relict river sediments has a significant impact on the chance of levee failure. Additionally, material being dredged from the river channel in the 1-mile stretch of the river closest to the levee is also significant in determining if the levee will fail or not. If the coefficients were interpretable (which they are not), I would say that the odds of levee failure increases between 96% and 2058% if the underlying floodplain surface was made up of course-grained relict river sediments; and the odds of levee failure decrease between 61% and 98% if material was dredged from the river channel in the 1-mile stretch of river closest to the levee. Thus, based on this analysis, (even though the coefficients are not interpretable, we can still conclude the impact of factors) I recommend not building levees on floodplain surfaces made up of course-grained relict river sediments; additionally, I do recommend dredging material from the river channel in the 1-mile stretch of river closest to the levee. All other factors that were included in this study need not be of concern to future projects. 
